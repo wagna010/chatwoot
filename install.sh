@@ -1,119 +1,147 @@
 #!/bin/bash
 
-CYAN="\033[1;36m"
-BOLD="\033[1m"
-WHITE="\033[97m"
-RESET="\033[0m"
-GREEN="\033[32m"
-YELLOW="\033[33m"
-RED="\033[31m"
+# Chatwoot Enterprise Installer
+# Execução direta: bash -c "$(curl -fsSL https://raw.githubusercontent.com/wagna010/chatwoot/main/install.sh)"
 
-show_header() {
-    clear
-    printf "${CYAN}${BOLD}"
-    cat <<'EOF'
- _____ _   _       _                   _     _____       _                       _          
-/  ___| | | |     | |                 | |   |  ___|     | |                     (_)         
-\ `--.| |_| | __ _| |_ ___   ___  ___ | |_  | |__ _ __ | |_ ___ _ __ _ __  _ __ _ ___  ___   
- `--. \  _  |/ _` | __/ __| / _ \/ _ \| __| |  __| '_ \| __/ _ \ '__| '_ \| '__| / __|/ _ \  
-/\__/ / | | | (_| | |_\__ \|  __/ (_) | |_  | |__| | | | ||  __/ |  | |_) | |  | \__ \  __/  
-\____/\_| |_/\__,_|\__|___/ \___|\___/ \__| \____/_| |_|\__\___|_|  | .__/|_|  |_|___/\___|  
-                                                                   | |                     
-                                                                   |_|                     
-EOF
-    printf "${RESET}\n"
-    printf "${WHITE}${BOLD}Chatwoot Enterprise Unlocker - Instalador${RESET}\n"
-    printf "${GREEN}Transforme seu Chatwoot Community em Enterprise completo${RESET}\n"
-    printf "${CYAN}================================================================${RESET}\n\n"
-}
+set -e
+
+# Cores para output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# URLs do repositório
+REPO_URL="https://github.com/wagna010/chatwoot.git"
+CLI_URL="https://raw.githubusercontent.com/wagna010/chatwoot/main/cli.sh"
+INSTALL_DIR="/tmp/chatwoot-enterprise-installer"
 
 log() {
     local level=$1
-    shift
-    local message="$*"
+    local message=$2
     case $level in
-        INFO)    echo -e "${CYAN}[INFO]${RESET} $message" ;;
-        SUCCESS) echo -e "${GREEN}[SUCCESS]${RESET} $message" ;;
-        WARNING) echo -e "${YELLOW}[WARNING]${RESET} $message" ;;
-        ERROR)   echo -e "${RED}[ERROR]${RESET} $message" ;;
+        INFO) echo -e "${BLUE}[INFO]${NC} $message" ;;
+        SUCCESS) echo -e "${GREEN}[SUCCESS]${NC} $message" ;;
+        WARNING) echo -e "${YELLOW}[WARNING]${NC} $message" ;;
+        ERROR) echo -e "${RED}[ERROR]${NC} $message" ;;
+        *) echo -e "[$level] $message" ;;
     esac
 }
 
-check_docker() {
-    if ! command -v docker >/dev/null 2>&1; then
-        log ERROR "Docker não está instalado."
-        log INFO "Por favor, instale o Docker primeiro: https://docs.docker.com/get-docker/"
+show_header() {
+    clear
+    echo -e "${CYAN}${BOLD}"
+    cat << 'EOF'
+  ____ _               _          _   _           _____           _        
+ / ___| |__   ___  ___| | _______| | | |_ __ ___ | ____|_ __   __| | _____ 
+| |   | '_ \ / _ \/ __| |/ / _ \ | | | | '_ ` _ \|  _| | '_ \ / _` |/ / _ \
+| |___| | | |  __/ (__|   <  __/ | |_| | | | | | | |___| | | | (_|   <  __/
+ \____|_| |_|\___|\___|_|\_\___|  \___/|_| |_| |_|_____|_| |_|\__,_|\_\___|
+EOF
+    echo -e "${NC}"
+    echo -e "${BOLD}Chatwoot Enterprise Installer${NC}"
+    echo -e "${GREEN}Instalação direta via GitHub${NC}"
+    echo -e "${BLUE}=============================================${NC}"
+    echo
+}
+
+check_dependencies() {
+    log INFO "Verificando dependências..."
+    
+    # Verificar curl
+    if ! command -v curl &> /dev/null; then
+        log ERROR "curl não encontrado. Instale com:"
+        echo "  Ubuntu/Debian: sudo apt-get install curl"
+        echo "  CentOS/RHEL: sudo yum install curl"
         exit 1
     fi
-
-    if ! docker info >/dev/null 2>&1; then
-        log ERROR "Docker não está rodando ou você não tem permissão para acessá-lo."
-        log INFO "Certifique-se de que o Docker está rodando e que seu usuário está no grupo 'docker'."
+    
+    # Verificar docker
+    if ! command -v docker &> /dev/null; then
+        log ERROR "Docker não encontrado. Instale primeiro:"
+        echo "  https://docs.docker.com/get-docker/"
         exit 1
     fi
+    
+    # Verificar se docker está rodando
+    if ! docker info &> /dev/null; then
+        log ERROR "Docker não está rodando. Inicie o Docker:"
+        echo "  sudo systemctl start docker"
+        exit 1
+    fi
+    
+    log SUCCESS "Todas dependências verificadas"
+}
 
-    log SUCCESS "Docker detectado e funcionando."
+download_installer() {
+    log INFO "Baixando instalador do Chatwoot Enterprise..."
+    
+    # Criar diretório temporário
+    rm -rf "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
+    
+    # Baixar o script CLI diretamente
+    if curl -fsSL -o chatwoot-cli.sh "$CLI_URL"; then
+        chmod +x chatwoot-cli.sh
+        log SUCCESS "Instalador baixado com sucesso"
+    else
+        log ERROR "Falha ao baixar o instalador"
+        exit 1
+    fi
 }
 
 check_chatwoot() {
     log INFO "Verificando instalações do Chatwoot..."
     
+    # Verificar Docker Swarm
+    if ! docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "active"; then
+        log ERROR "Docker Swarm não está ativo"
+        log INFO "Esta ferramenta requer Docker Swarm"
+        exit 1
+    fi
+    
+    # Verificar stacks Chatwoot
     STACK_NAME=$(docker stack ls --format '{{.Name}}' 2>/dev/null | grep -i chatwoot | head -n1)
     
     if [ -z "$STACK_NAME" ]; then
-        log ERROR "Nenhuma instalação do Chatwoot encontrada."
-        log INFO "Certifique-se de que o Chatwoot está rodando via Docker Swarm."
-        log INFO "Esta ferramenta suporta apenas Docker Swarm com Portainer."
+        log ERROR "Nenhuma stack Chatwoot encontrada"
+        log INFO "Certifique-se de que o Chatwoot está instalado via Docker Swarm"
         exit 1
     fi
-
-    log SUCCESS "Chatwoot encontrado via Docker Swarm: $STACK_NAME"
+    
+    log SUCCESS "Chatwoot encontrado: $STACK_NAME"
 }
 
-download_cli() {
-    log INFO "Baixando Chatwoot Enterprise CLI..."
+run_installer() {
+    log INFO "Iniciando instalador Chatwoot Enterprise..."
+    echo
     
-    TEMP_DIR=$(mktemp -d)
-    cd "$TEMP_DIR"
-    
-    # URL direta para o CLI (sem verificação de licença)
-    CLI_URL="https://raw.githubusercontent.com/example/chatwoot-enterprise/main/cli.sh"
-    
-    if curl -fsS -o chatwoot_enterprise_cli.sh "$CLI_URL"; then
-        chmod +x chatwoot_enterprise_cli.sh
-        log SUCCESS "CLI baixado com sucesso!"
-        
-        # Executar o CLI
-        ./chatwoot_enterprise_cli.sh
-        
-    else
-        log ERROR "Falha ao baixar o CLI."
-        exit 1
-    fi
-    
-    cd /
-    rm -rf "$TEMP_DIR"
+    # Executar o CLI
+    cd "$INSTALL_DIR"
+    ./chatwoot-cli.sh
+}
+
+cleanup() {
+    log INFO "Limpando arquivos temporários..."
+    rm -rf "$INSTALL_DIR"
+    log SUCCESS "Limpeza concluída"
 }
 
 main() {
     show_header
-    
-    log INFO "Bem-vindo ao Chatwoot Enterprise Unlocker!"
-    echo
-    log INFO "Este CLI irá transformar seu Chatwoot Community em Enterprise"
-    log INFO "desbloqueando todas as funcionalidades premium sem limitações."
-    echo
-    
-    printf "${YELLOW}${BOLD}[IMPORTANTE] Requisitos: Docker Swarm + Portainer${RESET}\n\n"
-    
-    check_docker
+    check_dependencies
     check_chatwoot
-    
-    echo
-    log INFO "Tudo pronto! Iniciando o processo de desbloqueio..."
-    sleep 2
-    
-    download_cli
+    download_installer
+    run_installer
+    cleanup
 }
 
-main
+# Tratamento de interrupção
+trap 'cleanup; exit 1' INT TERM
+
+# Executar principal
+main "$@"
